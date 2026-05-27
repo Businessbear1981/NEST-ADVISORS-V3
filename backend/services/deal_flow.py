@@ -33,6 +33,41 @@ def _most_common(values: list, fallback):
     return max(counts, key=counts.get) if counts else fallback
 
 
+def _document_checklist(sector: str, tax_status: str, security_type: str, enhancement: str) -> list[dict]:
+    """Derive the required document package from the instrument's profile.
+
+    Modeled on what a comparable completed bond required — grounded in the
+    instrument type (tax status, security, sector, enhancement), not invented.
+    """
+    docs = [
+        {"key": "audited_financials", "label": "Audited Financial Statements (2-3 yr)", "required": True, "reason": "credit baseline"},
+        {"key": "proforma", "label": "Pro Forma / Feasibility Projections", "required": True, "reason": "forward debt service coverage"},
+        {"key": "sources_and_uses", "label": "Sources & Uses", "required": True, "reason": "proceeds allocation"},
+        {"key": "officer_certificate", "label": "Officer's Certificate / Covenant Compliance", "required": True, "reason": "covenant baseline"},
+        {"key": "official_statement", "label": "Preliminary Official Statement", "required": True, "reason": "offering disclosure"},
+        {"key": "trust_indenture", "label": "Trust Indenture", "required": True, "reason": "defines trustee duties, flow of funds, call mechanics"},
+        {"key": "continuing_disclosure", "label": "Continuing Disclosure Agreement", "required": True, "reason": "SEC Rule 15c2-12"},
+    ]
+    if tax_status == "tax_exempt":
+        docs += [
+            {"key": "tefra_hearing", "label": "TEFRA Hearing Record", "required": True, "reason": "tax-exempt public approval"},
+            {"key": "tax_opinion", "label": "Bond Counsel Tax Opinion", "required": True, "reason": "tax-exempt status"},
+            {"key": "form_8038", "label": "IRS Form 8038", "required": True, "reason": "tax-exempt issuance filing"},
+        ]
+    if security_type == "pab_501c3":
+        docs.append({"key": "501c3_determination", "label": "IRS 501(c)(3) Determination Letter", "required": True, "reason": "qualified borrower"})
+    if sector in ("senior_living", "hospitals"):
+        docs += [
+            {"key": "feasibility_study", "label": "Market / Feasibility Study", "required": True, "reason": f"{sector.replace('_',' ')} demand + absorption"},
+            {"key": "appraisal", "label": "Appraisal", "required": True, "reason": "collateral value"},
+        ]
+    if sector == "senior_living":
+        docs.append({"key": "census_unit_mix", "label": "Census / Unit Mix Schedule", "required": False, "reason": "occupancy detail"})
+    if enhancement and enhancement not in ("none", None):
+        docs.append({"key": "enhancement_commitment", "label": f"{enhancement.replace('_',' ').title()} Commitment Letter", "required": True, "reason": "credit enhancement"})
+    return docs
+
+
 class DealFlow:
     """Orchestrates deal lifecycle across desks."""
 
@@ -216,7 +251,18 @@ class DealFlow:
                 enhancement = "surety"
             enhancement_rationale = f"sub-IG ({predicted}) — enhancement applied to target investment grade"
 
+        # Process blueprint — structure the deal around a completed comparable bond:
+        # who ran it (counterparties) and what documents it required.
+        top = comps[0] if comps else {}
+        process_blueprint = {
+            "modeled_on": top.get("borrower") if comps else "Operating Framework defaults",
+            "recommended_counterparties": top.get("counterparties", {}),
+            "document_checklist": _document_checklist(sector, tax_status, security_type, enhancement),
+            "call_mechanics": (top.get("call_schedule") if comps else base.get("call_schedule")) or {},
+        }
+
         structure = {
+            "process_blueprint": process_blueprint,
             "bond_type": bond_type,
             "amortization": amortization,
             "tax_status": tax_status,
