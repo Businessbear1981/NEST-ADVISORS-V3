@@ -9,6 +9,7 @@ import { useLocation } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import PreflightInterview from "@/components/PreflightInterview";
 
 const DEAL_TYPES = [
   { value: "ma_acquisition", label: "M&A Acquisition", description: "Financing a merger or acquisition — bond, bank, or equity" },
@@ -60,6 +61,7 @@ export default function DealInputPage() {
   const [, setLocation] = useLocation();
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const [interviewing, setInterviewing] = useState(false);
   const [dealId, setDealId] = useState("");
 
   // Basic intake fields only
@@ -100,7 +102,8 @@ export default function DealInputPage() {
       const data = await res.json();
       if (data.success) {
         setDealId(data.data?.id || data.data?.deal_id || "new");
-        setSubmitted(true);
+        // Interview is a required Stage-0 step before the deal advances to Roots.
+        setInterviewing(true);
 
         // Initialize in workflow pipeline
         await fetch("/api/workflow/init", {
@@ -114,6 +117,15 @@ export default function DealInputPage() {
         });
       }
     } finally { setSubmitting(false); }
+  }
+
+  if (interviewing && dealId) {
+    return (
+      <PreflightInterview
+        dealId={dealId}
+        onComplete={() => { setInterviewing(false); setSubmitted(true); }}
+      />
+    );
   }
 
   if (submitted) {

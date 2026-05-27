@@ -13,6 +13,61 @@ from __future__ import annotations
 from datetime import datetime
 
 
+# Investment-grade floor — anything below these is sub-IG and a candidate for
+# credit enhancement to lift it back into IG territory.
+_SUB_IG_RATINGS = {
+    "BB+", "BB", "BB-", "B+", "B", "B-", "CCC+", "CCC", "CCC-", "CC", "C", "D",
+    "BA1", "BA2", "BA3", "B1", "B2", "B3", "CAA1", "CAA2", "CAA3", "CA",
+}
+
+
+def _is_sub_ig(rating: str) -> bool:
+    return (rating or "").upper().replace(" ", "") in _SUB_IG_RATINGS
+
+
+def _most_common(values: list, fallback):
+    counts: dict = {}
+    for v in values:
+        if v:
+            counts[v] = counts.get(v, 0) + 1
+    return max(counts, key=counts.get) if counts else fallback
+
+
+def _document_checklist(sector: str, tax_status: str, security_type: str, enhancement: str) -> list[dict]:
+    """Derive the required document package from the instrument's profile.
+
+    Modeled on what a comparable completed bond required — grounded in the
+    instrument type (tax status, security, sector, enhancement), not invented.
+    """
+    docs = [
+        {"key": "audited_financials", "label": "Audited Financial Statements (2-3 yr)", "required": True, "reason": "credit baseline"},
+        {"key": "proforma", "label": "Pro Forma / Feasibility Projections", "required": True, "reason": "forward debt service coverage"},
+        {"key": "sources_and_uses", "label": "Sources & Uses", "required": True, "reason": "proceeds allocation"},
+        {"key": "officer_certificate", "label": "Officer's Certificate / Covenant Compliance", "required": True, "reason": "covenant baseline"},
+        {"key": "official_statement", "label": "Preliminary Official Statement", "required": True, "reason": "offering disclosure"},
+        {"key": "trust_indenture", "label": "Trust Indenture", "required": True, "reason": "defines trustee duties, flow of funds, call mechanics"},
+        {"key": "continuing_disclosure", "label": "Continuing Disclosure Agreement", "required": True, "reason": "SEC Rule 15c2-12"},
+    ]
+    if tax_status == "tax_exempt":
+        docs += [
+            {"key": "tefra_hearing", "label": "TEFRA Hearing Record", "required": True, "reason": "tax-exempt public approval"},
+            {"key": "tax_opinion", "label": "Bond Counsel Tax Opinion", "required": True, "reason": "tax-exempt status"},
+            {"key": "form_8038", "label": "IRS Form 8038", "required": True, "reason": "tax-exempt issuance filing"},
+        ]
+    if security_type == "pab_501c3":
+        docs.append({"key": "501c3_determination", "label": "IRS 501(c)(3) Determination Letter", "required": True, "reason": "qualified borrower"})
+    if sector in ("senior_living", "hospitals"):
+        docs += [
+            {"key": "feasibility_study", "label": "Market / Feasibility Study", "required": True, "reason": f"{sector.replace('_',' ')} demand + absorption"},
+            {"key": "appraisal", "label": "Appraisal", "required": True, "reason": "collateral value"},
+        ]
+    if sector == "senior_living":
+        docs.append({"key": "census_unit_mix", "label": "Census / Unit Mix Schedule", "required": False, "reason": "occupancy detail"})
+    if enhancement and enhancement not in ("none", None):
+        docs.append({"key": "enhancement_commitment", "label": f"{enhancement.replace('_',' ').title()} Commitment Letter", "required": True, "reason": "credit enhancement"})
+    return docs
+
+
 class DealFlow:
     """Orchestrates deal lifecycle across desks."""
 
@@ -131,19 +186,144 @@ class DealFlow:
         return deal
 
     def run_structuring(self, deal: dict) -> dict:
-        """Stage 4: Structuring. Finalize covenants, terms."""
-        covenant_package = self.intel.build_covenant_package(
-            deal.get("deal_type", "ma_acquisition"),
-            deal.get("credit_grade", "BBB"),
-            deal.get("sector", "business_services"),
-        )
-        deal["covenant_package"] = covenant_package
-        deal.setdefault("desk_outputs", {})["structuring"] = {
-            "covenant_package": covenant_package,
-            "bond_type": deal.get("bond_type", "taxable_senior_secured"),
-            "amortization": deal.get("amortization", "io_then_amort"),
-            "tenor_years": deal.get("tenor_years", 7),
+        """Stage 4: Structuring. Derive terms from EMMA comparables, refined by the rating.
+
+        Tiered match:
+          1. tight comps  — same sector, similar size, same rating band (near-exact)
+          2. similar comps — same sector, wider size band, any rating
+          3. static Bible  — Operating Framework defaults when EMMA has no comps
+                             (expected for M&A/corporate — EMMA is municipal/revenue bonds)
+
+        The chosen path is recorded in `match_quality` so the structure is transparent
+        about whether it was learned from funded deals or fell back to framework defaults.
+
+        First routes the deal to a financing track (Structuring Desk). Only the
+        bond track runs the EMMA-comp derivation below; conventional / PE / family
+        office / bridge get their own track profile.
+        """
+        # Track routing — bond is one of several financing tracks.
+        from services.structuring_router import classify_track, non_bond_profile
+        track_info = classify_track(deal)
+        deal["track"] = track_info["track"]
+        deal["track_rationale"] = track_info["rationale"]
+        if track_info["track"] != "bond":
+            profile = non_bond_profile(deal, track_info["track"])
+            profile["track_rationale"] = track_info["rationale"]
+            deal["structure"] = profile
+            deal.setdefault("desk_outputs", {})["structuring"] = profile
+            deal["stage"] = "structuring_complete"
+            deal["stage_timestamp"] = datetime.utcnow().isoformat()
+            return deal
+
+        sector = deal.get("sector", "corporate_ma")
+        deal_type = deal.get("deal_type", "ma_acquisition")
+        predicted = deal.get("predicted_moodys") or deal.get("credit_grade") or ""
+
+        from services.emma_engine import EMMAEngine, PARSED_BONDS
+        from services.emma_seed_data import seed_emma_database
+        if not PARSED_BONDS:
+            seed_emma_database()  # load the comp corpus so aggregation/comps have data
+        emma = EMMAEngine()
+
+        par = float(deal.get("bond_amount") or deal.get("project_size") or 0)
+        inf = float("inf")
+        tight = (par * 0.6, par * 1.6) if par else (0, inf)
+        wide = (par * 0.3, par * 3.0) if par else (0, inf)
+
+        # Tier 1 — near-exact: sector + similar size + same rating.
+        comps = emma.find_comps(sector=sector, min_par=tight[0], max_par=tight[1], rating=predicted, limit=5)
+        match_quality = "exact_comp"
+        if not comps:
+            # Tier 2 — similar: sector + wider size band, any rating.
+            comps = emma.find_comps(sector=sector, min_par=wide[0], max_par=wide[1], limit=8)
+            match_quality = "similar_comp"
+
+        # Bible / Operating Framework static base — full structural scaffold for the sector.
+        base = emma._static_template(sector).get("template", {})
+
+        if comps:
+            # Learn the structural pattern from the comparable funded deals.
+            bond_type = _most_common([c.get("bond_type") for c in comps], base.get("bond_type") or base.get("typical_amortization"))
+            amortization = _most_common([c.get("amortization") for c in comps], base.get("typical_amortization"))
+            tax_status = _most_common([c.get("tax_status") for c in comps], base.get("typical_tax_status"))
+            security_type = _most_common([c.get("security_type") for c in comps], base.get("security_type"))
+            enhancement = _most_common([(c.get("enhancement") or {}).get("type") for c in comps], base.get("typical_enhancement"))
+        else:
+            # Tier 3 — no EMMA comps (expected for M&A/corporate): use Bible defaults.
+            match_quality = "static_bible"
+            bond_type = base.get("bond_type") or base.get("typical_amortization")
+            amortization = base.get("typical_amortization")
+            tax_status = base.get("typical_tax_status")
+            security_type = base.get("security_type")
+            enhancement = base.get("typical_enhancement")
+
+        # Grade-aware covenants, merged with the comp/Bible covenant pattern.
+        covenant_package = self.intel.build_covenant_package(deal_type, deal.get("credit_grade", "BBB"), sector)
+        covenant_package = {**base.get("covenant_package", {}), **(covenant_package or {})}
+
+        # Enhancement decision: lift sub-IG deals toward IG with credit enhancement
+        # (NEST model defaults to Hylant surety when none is indicated).
+        enhancement_rationale = "matched comparable structure"
+        if _is_sub_ig(predicted):
+            if not enhancement or enhancement == "none":
+                enhancement = "surety"
+            enhancement_rationale = f"sub-IG ({predicted}) — enhancement applied to target investment grade"
+
+        # Bond product selection — which bond type fits this deal (Use Case Manual §6).
+        # M&A is fully encoded; other use cases fall through until their chapters land.
+        bond_product = None
+        if deal_type == "ma_acquisition":
+            from services.bond_products import recommend_ma_variant
+            bond_product = recommend_ma_variant(deal)
+
+        # Process blueprint — structure the deal around a completed comparable bond:
+        # who ran it (counterparties) and what documents it required.
+        top = comps[0] if comps else {}
+        process_blueprint = {
+            "modeled_on": top.get("borrower") if comps else "Operating Framework defaults",
+            "recommended_counterparties": top.get("counterparties", {}),
+            "document_checklist": _document_checklist(sector, tax_status, security_type, enhancement),
+            "call_mechanics": (top.get("call_schedule") if comps else base.get("call_schedule")) or {},
         }
+
+        structure = {
+            "bond_product": bond_product,
+            "process_blueprint": process_blueprint,
+            "bond_type": bond_type,
+            "amortization": amortization,
+            "tax_status": tax_status,
+            "security_type": security_type,
+            "enhancement": enhancement,
+            "enhancement_rationale": enhancement_rationale,
+            "call_schedule": base.get("call_schedule", {"nc_period_years": 10, "par_call_after": True}),
+            "maturity_years": base.get("maturity_years", deal.get("tenor_years", 30)),
+            "coupon_guidance": base.get("coupon_range", {}),
+            "reserves": base.get("reserves", {}),
+            "covenant_package": covenant_package,
+            "match_quality": match_quality,
+            "derived_from": {
+                "method": "emma_comps+rating",
+                "sector": sector,
+                "predicted_rating": predicted,
+                "par_reference": par,
+                "comp_sample_size": len(comps),
+                "comps": [
+                    {
+                        "borrower": c.get("borrower"),
+                        "par_amount": c.get("par_amount"),
+                        "bond_type": c.get("bond_type"),
+                        "amortization": c.get("amortization"),
+                        "enhancement": (c.get("enhancement") or {}).get("type"),
+                        "ratings": c.get("ratings"),
+                    }
+                    for c in comps
+                ],
+            },
+        }
+
+        deal["covenant_package"] = covenant_package
+        deal["structure"] = structure
+        deal.setdefault("desk_outputs", {})["structuring"] = structure
         deal["stage"] = "structuring_complete"
         deal["stage_timestamp"] = datetime.utcnow().isoformat()
         return deal

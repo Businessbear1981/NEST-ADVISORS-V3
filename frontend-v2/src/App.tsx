@@ -39,6 +39,15 @@ import DealInputPage from "./pages/v4/DealInputPage";
 import DealsPage from "./pages/v4/DealsPage";
 import RootsUploadPage from "./pages/v4/RootsUploadPage";
 import ClientDashboardPage from "./pages/v4/ClientDashboardPage";
+// Phase 1 — wire previously-orphaned intelligence modules (real backend fetches)
+import BondIntelligence from "./components/BondIntelligence";
+import ModelingStudio from "./components/ModelingStudio";
+import ForensicAudit from "./components/ForensicAudit";
+import RiskCommandCenter from "./components/RiskCommandCenter";
+import LenderCommandCenter from "./components/LenderCommandCenter";
+import CentralNervousSystem from "./components/CentralNervousSystem";
+import MarketingStudio from "./components/MarketingStudio";
+import InstitutionalDashboard from "./components/InstitutionalDashboard";
 
 function BondCommandPage(props: any) {
   return (
@@ -92,6 +101,15 @@ function Router() {
       <Route path={"/upload"}>{() => <main className="min-h-screen bg-[#03060b] px-4 py-6 text-slate-100 sm:px-8"><RootsUploadPage /></main>}</Route>
       <Route path={"/client"}>{() => <main className="min-h-screen bg-[#03060b] px-4 py-6 text-slate-100 sm:px-8"><ClientDashboardPage /></main>}</Route>
       <Route path={"/client/:dealId"}>{() => <main className="min-h-screen bg-[#03060b] px-4 py-6 text-slate-100 sm:px-8"><ClientDashboardPage /></main>}</Route>
+      {/* Phase 1 — orphaned intelligence modules wired to routes */}
+      <Route path={"/bond-intel"}>{() => <main className="min-h-screen bg-[#03060b] px-4 py-6 text-slate-100 sm:px-8"><BondIntelligence /></main>}</Route>
+      <Route path={"/modeling"}>{() => <main className="min-h-screen bg-[#03060b] px-4 py-6 text-slate-100 sm:px-8"><ModelingStudio /></main>}</Route>
+      <Route path={"/forensic"}>{() => <main className="min-h-screen bg-[#03060b] px-4 py-6 text-slate-100 sm:px-8"><ForensicAudit /></main>}</Route>
+      <Route path={"/risk"}>{() => <main className="min-h-screen bg-[#03060b] px-4 py-6 text-slate-100 sm:px-8"><RiskCommandCenter /></main>}</Route>
+      <Route path={"/lenders"}>{() => <main className="min-h-screen bg-[#03060b] px-4 py-6 text-slate-100 sm:px-8"><LenderCommandCenter /></main>}</Route>
+      <Route path={"/ai-tools"}>{() => <main className="min-h-screen bg-[#03060b] px-4 py-6 text-slate-100 sm:px-8"><CentralNervousSystem /></main>}</Route>
+      <Route path={"/marketing"}>{() => <main className="min-h-screen bg-[#03060b] px-4 py-6 text-slate-100 sm:px-8"><MarketingStudio /></main>}</Route>
+      <Route path={"/institutional"}>{() => <main className="min-h-screen bg-[#03060b] px-4 py-6 text-slate-100 sm:px-8"><InstitutionalDashboard /></main>}</Route>
       <Route path={"/404"} component={NotFound} />
       <Route component={NotFound} />
     </Switch>
