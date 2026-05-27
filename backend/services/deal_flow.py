@@ -251,6 +251,13 @@ class DealFlow:
                 enhancement = "surety"
             enhancement_rationale = f"sub-IG ({predicted}) — enhancement applied to target investment grade"
 
+        # Bond product selection — which bond type fits this deal (Use Case Manual §6).
+        # M&A is fully encoded; other use cases fall through until their chapters land.
+        bond_product = None
+        if deal_type == "ma_acquisition":
+            from services.bond_products import recommend_ma_variant
+            bond_product = recommend_ma_variant(deal)
+
         # Process blueprint — structure the deal around a completed comparable bond:
         # who ran it (counterparties) and what documents it required.
         top = comps[0] if comps else {}
@@ -262,6 +269,7 @@ class DealFlow:
         }
 
         structure = {
+            "bond_product": bond_product,
             "process_blueprint": process_blueprint,
             "bond_type": bond_type,
             "amortization": amortization,
