@@ -26,6 +26,8 @@ const NAV_SECTIONS = [
     label: "STRUCTURING",
     items: [
       { label: "Bond Desk", href: "/bond-desk", icon: Landmark },
+      { label: "Bond Intel", href: "/bond-intel", icon: BarChart3 },
+      { label: "Modeling", href: "/modeling", icon: Activity },
       { label: "Credit & Rating", href: "/credit", icon: Scale },
       { label: "Rating Submission", href: "/rating", icon: BarChart3 },
       { label: "Enhancement", href: "/surety", icon: FileCheck },
@@ -35,6 +37,7 @@ const NAV_SECTIONS = [
     label: "EXECUTION",
     items: [
       { label: "Placement", href: "/hawkeye", icon: Target },
+      { label: "Lenders", href: "/lenders", icon: Users },
       { label: "Doc Upload", href: "/upload", icon: TreePine },
       { label: "Construction", href: "/construction", icon: Building2 },
       { label: "Treasury", href: "/treasury", icon: Landmark },
@@ -44,6 +47,8 @@ const NAV_SECTIONS = [
     label: "ADMINISTRATION",
     items: [
       { label: "Covenants", href: "/covenants", icon: Scale },
+      { label: "Risk / Sentinel", href: "/risk", icon: Shield },
+      { label: "Forensic", href: "/forensic", icon: ClipboardCheck },
       { label: "Surveillance", href: "/surveillance", icon: Eye },
       { label: "Compliance", href: "/nightvision", icon: Shield },
       { label: "Trustee", href: "/trustee", icon: Users },
@@ -52,6 +57,9 @@ const NAV_SECTIONS = [
   {
     label: "SYSTEM",
     items: [
+      { label: "HFT Fund", href: "/institutional", icon: Landmark },
+      { label: "Marketing", href: "/marketing", icon: Briefcase },
+      { label: "AI Tools", href: "/ai-tools", icon: Radio },
       { label: "EMMA", href: "/emma", icon: BarChart3 },
       { label: "Agents", href: "/agents/platform", icon: Bot },
       { label: "Admin", href: "/admin", icon: Lock },
