@@ -196,7 +196,25 @@ class DealFlow:
 
         The chosen path is recorded in `match_quality` so the structure is transparent
         about whether it was learned from funded deals or fell back to framework defaults.
+
+        First routes the deal to a financing track (Structuring Desk). Only the
+        bond track runs the EMMA-comp derivation below; conventional / PE / family
+        office / bridge get their own track profile.
         """
+        # Track routing — bond is one of several financing tracks.
+        from services.structuring_router import classify_track, non_bond_profile
+        track_info = classify_track(deal)
+        deal["track"] = track_info["track"]
+        deal["track_rationale"] = track_info["rationale"]
+        if track_info["track"] != "bond":
+            profile = non_bond_profile(deal, track_info["track"])
+            profile["track_rationale"] = track_info["rationale"]
+            deal["structure"] = profile
+            deal.setdefault("desk_outputs", {})["structuring"] = profile
+            deal["stage"] = "structuring_complete"
+            deal["stage_timestamp"] = datetime.utcnow().isoformat()
+            return deal
+
         sector = deal.get("sector", "corporate_ma")
         deal_type = deal.get("deal_type", "ma_acquisition")
         predicted = deal.get("predicted_moodys") or deal.get("credit_grade") or ""
